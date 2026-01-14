@@ -1,0 +1,29 @@
+/control/verbose 1
+/run/verbose 1
+
+# --- まず初期化 ---
+/run/initialize
+
+# --- 解析はオフ（UIセッションでは不要＆警告回避） ---
+/analysis/setActivation false
+
+# --- ビューアを開く（Qt用 OpenGL）---
+/vis/open OGLSQt
+/vis/scene/create
+/vis/scene/add/volume
+/vis/scene/add/axes 0 0 0 10 cm
+/vis/scene/add/trajectories smooth
+/vis/sceneHandler/attach
+/vis/viewer/set/style surface
+/vis/viewer/set/background white
+/vis/viewer/set/viewpointThetaPhi 70 20     # 視線と上方向の警告を回避
+/vis/scene/endOfEventAction accumulate       # イベント蓄積表示
+
+# --- 粒子源 ---
+/gun/particle e+
+/gun/energy 53 MeV
+/gun/position 0 0 -49 cm
+/gun/direction 0 0 1
+
+# --- 実行 ---
+/run/beamOn 1

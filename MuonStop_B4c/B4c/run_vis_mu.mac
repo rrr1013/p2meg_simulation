@@ -1,0 +1,46 @@
+# ===== Visualization for 27 MeV mu+ =====
+
+/control/verbose 1
+/run/verbose 1
+/event/verbose 0
+/tracking/verbose 0
+
+# --- まず初期化 ---
+/run/initialize
+
+# --- 解析はオフ（UIセッションの警告回避用）---
+/analysis/setActivation false
+
+# --- 可視化（Qt OpenGL）---
+/vis/open OGLIQt           # もし警告が出たら OGLIQt に変える
+/vis/scene/create
+/vis/scene/add/volume
+/vis/scene/add/axes 0 0 0 10 cm
+/vis/scene/add/trajectories smooth
+/vis/sceneHandler/attach
+/vis/viewer/set/style surface
+/vis/viewer/set/background white
+/vis/viewer/set/lineSegmentsPerCircle 100
+/vis/scene/endOfEventAction accumulate
+
+
+#  trajectory colors by particle type
+/vis/modeling/trajectories/create/drawByParticleID
+/vis/modeling/trajectories/drawByParticleID-0/set mu+ pink
+/vis/modeling/trajectories/drawByParticleID-0/set e+ blue
+/vis/modeling/trajectories/drawByParticleID-0/set e- red
+/vis/modeling/trajectories/drawByParticleID-0/set gamma green
+
+
+
+/vis/scene/add/trajectories
+
+
+# --- 粒子ガン：4 MeV μ+ を +z 方向へ ---
+/gun/particle mu+
+/gun/energy 4 MeV
+/gun/position 0 0 -49 cm     # ターゲットが原点の場合。近づけたいなら -5 mm などに
+/gun/direction 0 0 1
+
+# --- 発射 ---
+/run/beamOn 1

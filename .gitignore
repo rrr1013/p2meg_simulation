@@ -39,3 +39,27 @@
 
 # debug information files
 *.dwo
+
+# build artifacts
+build/
+*/build/
+CMakeFiles/
+*/CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# IDE
+.vscode/
+.idea/
+
+# Geant4 outputs
+*/run/
+*.root
+*.csv
+*.dat
+*.txt
+
+# macOS
+.DS_Store
+EOF

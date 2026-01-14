@@ -1,0 +1,17 @@
+# --- quiet-ish ---
+/control/verbose 1
+/run/verbose 1
+/event/verbose 0
+/tracking/verbose 0
+
+# まず初期化（これより前に /gun は使えません）
+/run/initialize
+
+# 粒子ガン設定（G4ParticleGun を使っている前提）
+/gun/particle mu+
+/gun/energy 4 MeV
+/gun/position 0 0 -5 cm
+/gun/direction 0 0 1
+
+# 実行
+/run/beamOn 100000
