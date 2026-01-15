@@ -1,14 +1,12 @@
 // RunAction.cc  (FIXED)
 #include "RunAction.hh"
 #include "MyRun.hh"
-#include "CalorimeterDigitizer.hh"
 
 #include "G4Run.hh"
 #include "G4RunManager.hh"
 #include "G4Threading.hh"
 #include "G4SystemOfUnits.hh"
 #include "G4UnitsTable.hh"
-#include "G4DigiManager.hh"
 
 #include "TFile.h"
 #include "TTree.h"
@@ -35,25 +33,6 @@ void RunAction::BeginOfRunAction(const G4Run* run)
     } else {
         G4cout << "### [WORKER " << G4Threading::G4GetThreadId()
                << "] Run " << runID << " start." << G4endl;
-    }
-    
-    // ================================
-    // ★ Digitizer 登録（ここだけ追加）
-    // ================================
-    auto digiMan = G4DigiManager::GetDMpointer();
-
-    // ---- NaI ----
-    if (!digiMan->FindDigitizerModule("NaIDigi")) {
-        auto naiDigi = new CalorimeterDigitizer("NaIDigi", "NaISD/HitsCollection");
-        digiMan->AddNewModule(naiDigi);
-        G4cout << "[RunAction] NaIDigi registered" << G4endl;
-    }
-
-    // ---- PS ---- ★追加
-    if (!digiMan->FindDigitizerModule("PSDigi")) {
-        auto psDigi = new CalorimeterDigitizer("PSDigi", "PSSD/HitsCollection");
-        digiMan->AddNewModule(psDigi);
-        G4cout << "[RunAction] PSDigi registered" << G4endl;
     }
 
     // 修正点: ここで fNmu/fNcoinc を RunAction メンバで初期化しない

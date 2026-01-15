@@ -3,21 +3,17 @@
 #include "SensitiveDetector.hh"
 #include "MyRun.hh"
 #include "Constants.hh"
-#include "CalorimeterDigit.hh"
 
-#include "G4DCofThisEvent.hh"
+#include "G4Event.hh"
 #include "G4HCofThisEvent.hh"
 #include "G4SDManager.hh"
 #include "G4RunManager.hh"
 #include "G4SystemOfUnits.hh"
-#include "G4DigiManager.hh"
 
 // 追加
 #include "G4ios.hh"
 #include <cmath>
 #include <limits> 
-#include <vector>
-#include <algorithm>
 
 EventAction::EventAction()
 : G4UserEventAction(),
@@ -25,9 +21,7 @@ EventAction::EventAction()
   fEthPS(1.*MeV),
   fCoincDT(10.*ns),
   fPSHCID(-1),
-  fNaIHCID(-1),
-  fPSDCID(-1),
-  fNaIDCID(-1)
+  fNaIHCID(-1)
 {}
 
 void EventAction::BeginOfEventAction(const G4Event*)
@@ -53,84 +47,85 @@ void EventAction::EndOfEventAction(const G4Event* event)
         G4cout << "[FATAL] CurrentRun is not MyRun. Check RunAction::GenerateRun()." << G4endl;
         return;
     }
-        
-    // ===============================
-    // 1) Digitize (NaI)
-    // ===============================
-    // ★ここで Digitize を実行（必須）
-    auto* digiMan = G4DigiManager::GetDMpointer();
-    digiMan->Digitize("NaIDigi");
-    digiMan->Digitize("PSDigi");
 
-    auto* dce = event->GetDCofThisEvent();
-    if (!dce) return;
+    auto hce = event->GetHCofThisEvent();
+    if (!hce) return;
 
-    // ===============================
-    // 2) Get NaI DigitsCollection
-    // ===============================
-    if (fNaIDCID < 0) {
-        fNaIDCID = digiMan->GetDigiCollectionID("NaIDigi/DigitsCollection");
-        G4cout << "[DEBUG] NaIDCID = " << fNaIDCID << G4endl;
+    // --- HCID を取得（初回のみ）---
+    if (fPSHCID < 0 || fNaIHCID < 0) {
+        auto sdManager = G4SDManager::GetSDMpointer();
+
+        if (fPSHCID < 0) {
+            fPSHCID  = sdManager->GetCollectionID("PSSD/HitsCollection");
+            G4cout << "[DEBUG] PSHCID  = " << fPSHCID << G4endl;
+        }
+        if (fNaIHCID < 0) {
+            fNaIHCID = sdManager->GetCollectionID("NaISD/HitsCollection");
+            G4cout << "[DEBUG] NaIHCID = " << fNaIHCID << G4endl;
+        }
     }
-    if (fPSDCID < 0) {
-        fPSDCID = digiMan->GetDigiCollectionID("PSDigi/DigitsCollection");
-        G4cout << "[DEBUG] PSDCID  = " << fPSDCID << G4endl;
-    }
-    if (fNaIDCID < 0 || fPSDCID < 0) return;
+    if (fPSHCID < 0 || fNaIHCID < 0) return;
 
-    auto* naiDC = static_cast<CalorimeterDigitsCollection*>(dce->GetDC(fNaIDCID));
-    auto* psDC  = static_cast<CalorimeterDigitsCollection*>(dce->GetDC(fPSDCID));
+    auto psHits  = static_cast<SimpleHitsCollection*>(hce->GetHC(fPSHCID));
+    auto naiHits = static_cast<SimpleHitsCollection*>(hce->GetHC(fNaIHCID));
+    if (!psHits || !naiHits) return;
 
-    static int nprint = 0;
-    if (nprint < 50) {
-    G4cout << "[DEBUG] naiDC=" << (naiDC? "OK":"NULL")
-            << " psDC=" << (psDC? "OK":"NULL");
-    if (naiDC) G4cout << " naiN=" << naiDC->entries();
-    if (psDC)  G4cout << " psN="  << psDC->entries();
-    G4cout << G4endl;
-    nprint++;
-    }
+    // デバッグ（必要なら）
+    // G4cout << "[DEBUG] PS hits size  = " << psHits->GetSize()
+    //        << "  NaI hits size = " << naiHits->GetSize() << G4endl;
 
-    if (!naiDC || !psDC) return;
-    if (naiDC->entries() == 0) return;  // PS が無くても NaI は必要
-
-    // ===============================
-    // 3) Build per-bin info from Digits
-    // ===============================
-    struct Info {
-        bool hitNaI = false;
-        bool hitPS  = false;
-        double ENaI = 0.0;
-        double EPS  = 0.0;
-        double tNaI = std::numeric_limits<double>::max();
-        double tPS  = std::numeric_limits<double>::max();
+    // --- bin-wise hit information ---
+    struct HitInfo {
+        bool   hitPS   = false;
+        bool   hitNaI  = false;
+        double timePS  = std::numeric_limits<double>::max();
+        double timeNaI = std::numeric_limits<double>::max();
+        double edepPS  = 0.0;
+        double edepNaI = 0.0;
     };
-    std::vector<Info> m(kNbin);
 
-    // ---- NaI digits ----
-    for (size_t i = 0; i < naiDC->entries(); ++i) {
-        auto* d = (*naiDC)[i];
-        int bin = d->GetChannelID();
-        if (bin < 0 || bin >= kNbin) continue;
-        m[bin].hitNaI = true;
-        m[bin].ENaI  += d->GetEnergy();
-        m[bin].tNaI   = std::min(m[bin].tNaI, d->GetTime());
+    std::vector<HitInfo> hitMap(kNbin);
+
+    // ===============================
+    // PS hits
+    // ===============================
+    for (size_t i = 0; i < psHits->GetSize(); ++i) {
+        auto hit = (*psHits)[i];
+        int bin  = hit->GetCopyNo();
+
+        if (bin < 0 || bin >= kNbin) continue;   // ★FIX: safety
+
+        auto& info = hitMap[bin];
+
+        info.edepPS += hit->GetEdep();           // ★FIX: 先に全加算
+        info.timePS = std::min(info.timePS,
+                               hit->GetTime()); // ★FIX: 最小時刻
     }
 
-    // ---- PS digits ----
-    for (size_t i = 0; i < psDC->entries(); ++i) {
-        auto* d = (*psDC)[i];
-        int bin = d->GetChannelID();
-        if (bin < 0 || bin >= kNbin) continue;
-        m[bin].hitPS = true;
-        m[bin].EPS  += d->GetEnergy();
-        m[bin].tPS   = std::min(m[bin].tPS, d->GetTime());
+    // ===============================
+    // NaI hits
+    // ===============================
+    for (size_t i = 0; i < naiHits->GetSize(); ++i) {
+        auto hit = (*naiHits)[i];
+        int bin  = hit->GetCopyNo();
+
+        if (bin < 0 || bin >= kNbin) continue;   // ★FIX: safety
+
+        auto& info = hitMap[bin];
+
+        info.edepNaI += hit->GetEdep();          // ★FIX: 先に全加算
+        info.timeNaI = std::min(info.timeNaI,
+                                hit->GetTime()); // ★FIX: 最小時刻
     }
 
-    // threshold
+    // ===============================
+    // ★FIX: ここで初めてしきい値判定
+    // ===============================
     for (int bin = 0; bin < kNbin; ++bin) {
-        if (m[bin].hitNaI && m[bin].ENaI < fEthNaI) m[bin].hitNaI = false;
-        if (m[bin].hitPS  && m[bin].EPS  < fEthPS)  m[bin].hitPS  = false;
+        auto& info = hitMap[bin];
+
+        info.hitPS  = (info.edepPS  >= fEthPS);
+        info.hitNaI = (info.edepNaI >= fEthNaI);
     }
 
     // // --- back-to-back e+ – gamma coincidence ---
@@ -168,20 +163,30 @@ void EventAction::EndOfEventAction(const G4Event* event)
     //     //        << " dt_e=" << dt_e/ns << " ns"
     //     //        << " dt_eg=" << dt_eg/ns << " ns" << G4endl;
     // }
+        
+    
+    
+    // --- angle distribution (first-hit only) ---
+
+    const double dphi = 2.0 * CLHEP::pi / kNbin;
 
     // ===============================
-    // 4) Select e-side and gamma-side (NaI-only first step)
-    //    - e-side: earliest NaI digit (仮)
-    //    - gamma : another NaI digit with |dt| < fCoincDT minimizing |dt|
+    // 1) e+ : 最初に入った bin を選ぶ
     // ===============================
     int best_bin_e = -1;
     double best_time_e = std::numeric_limits<double>::max();
 
     for (int bin = 0; bin < kNbin; ++bin) {
-        if (!(m[bin].hitPS && m[bin].hitNaI)) continue;
-        if (m[bin].tNaI < best_time_e) {
-            best_time_e = m[bin].tNaI;
-            best_bin_e = bin;
+        const auto& info = hitMap[bin];
+
+        if (!(info.hitPS && info.hitNaI)) continue;
+
+        //NaIに最初に入った時刻（実験のe側トリガーがNaI基準ならこれ）
+        const double t_e = info.timeNaI;
+
+        if (t_e < best_time_e) {
+            best_time_e = t_e;
+            best_bin_e  = bin;
         }
     }
 
@@ -192,18 +197,23 @@ void EventAction::EndOfEventAction(const G4Event* event)
     // 2) gamma : 最初の NaI hit で |dt| 最小
     // ===============================
     int best_bin_g = -1;
-    double best_abs_dt = std::numeric_limits<double>::max();
+    double best_dt = std::numeric_limits<double>::max();
 
     for (int bin = 0; bin < kNbin; ++bin) {
         if (bin == best_bin_e) continue;
-        if (!(m[bin].hitNaI && !m[bin].hitPS)) continue;
 
-        double dt = m[best_bin_e].tNaI - m[bin].tNaI;
-        double absdt = std::abs(dt);
-        if (absdt > fCoincDT) continue;
+        const auto& info = hitMap[bin];
 
-        if (absdt < best_abs_dt) {
-            best_abs_dt = absdt;
+        if (!(info.hitNaI && !info.hitPS)) continue;
+
+        const double dt_ge =
+            hitMap[best_bin_e].timeNaI - info.timeNaI;
+
+        const double abs_dt = std::abs(dt_ge);
+        if (abs_dt > fCoincDT) continue;
+
+        if (abs_dt < best_dt) {
+            best_dt    = abs_dt;
             best_bin_g = bin;
         }
     }
@@ -212,10 +222,8 @@ void EventAction::EndOfEventAction(const G4Event* event)
     if (best_bin_g < 0) return;
 
     // ===============================
-    // 5) Reconstruct (Epos, Egam, dt, theta, cos)
+    // 3) 角度・cos・エネルギー計算
     // ===============================
-    const double dphi = 2.0 * CLHEP::pi / kNbin;
-
     const double phi_e = (best_bin_e + 0.5) * dphi;
     const double phi_g = (best_bin_g + 0.5) * dphi;
 
@@ -227,16 +235,19 @@ void EventAction::EndOfEventAction(const G4Event* event)
     double cos_pos = -std::cos(phi_e);
     double cos_gam = -std::cos(phi_g);
 
-    double Epos = m[best_bin_e].ENaI; // ★まずはNaIのみ推奨
-    double Egam = m[best_bin_g].ENaI;
-    double dt_ns = (m[best_bin_e].tNaI - m[best_bin_g].tNaI) / ns;
+    double Epos = hitMap[best_bin_e].edepPS
+                + hitMap[best_bin_e].edepNaI;
+    double Egam = hitMap[best_bin_g].edepNaI;
+
+    double dt = (hitMap[best_bin_e].timeNaI
+            - hitMap[best_bin_g].timeNaI) / ns;
 
     // ===============================
-    // 6) Store (one pair per event)
+    // 4) 出力（1イベント1ペア）
     // ===============================
     myRun->AddCoincData(Epos/MeV,
                         Egam/MeV,
-                        dt_ns,
+                        dt,
                         theta,
                         cos_pos,
                         cos_gam);
