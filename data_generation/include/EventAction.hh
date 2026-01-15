@@ -18,9 +18,6 @@ private:
     // ヒットコレクション ID
     G4int fNaIHCID;
     G4int fPSHCID;
-    // Digits
-    G4int fNaIDCID;
-    G4int fPSDCID;
 
     // しきい値・coincidence 窓
     G4double fEthNaI;
